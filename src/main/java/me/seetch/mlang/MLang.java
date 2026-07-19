@@ -2,8 +2,9 @@ package me.seetch.mlang;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import lombok.Getter;
-import lombok.extern.java.Log;
+import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
@@ -11,33 +12,64 @@ import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.*;
-import java.net.URL;
-import java.util.HashMap;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.Reader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-@Log
-@Getter
 public class MLang {
 
     private static final String DEFAULT_LANGUAGE = "en_us";
-    private static final String DEFAULT_VERSION = "1.20.4";
+    private static final String FALLBACK_VERSION = "1.20.4";
     private static final String GITHUB_BASE_URL = "https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/";
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
     private static MLang instance;
 
+    @Getter
     private final JavaPlugin plugin;
+    @Getter
     private final Gson gson;
+    private final Logger logger;
     private final Map<String, JsonObject> loadedLanguages;
+    private final HttpClient httpClient;
+    private final ExecutorService loaderExecutor;
 
-    private String defaultLanguage;
-    private String defaultVersion;
+    @Getter
+    private volatile String defaultLanguage;
+    @Getter
+    private volatile String defaultVersion;
 
     private MLang(JavaPlugin plugin) {
         this.plugin = plugin;
         this.gson = new Gson();
-        this.loadedLanguages = new HashMap<>();
+        this.logger = plugin.getLogger();
+        this.loadedLanguages = new ConcurrentHashMap<>();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+        this.loaderExecutor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("mlang-loader-", 0).factory());
         this.defaultLanguage = DEFAULT_LANGUAGE;
         this.defaultVersion = detectMinecraftVersion();
         initializeLanguagesDirectory();
@@ -45,37 +77,40 @@ public class MLang {
 
     public static synchronized MLang getInstance(JavaPlugin plugin) {
         if (instance == null) {
-            instance = new MLang(plugin);
+            instance = new MLang(Objects.requireNonNull(plugin, "plugin"));
         }
         return instance;
     }
 
     public void setDefaultLanguage(String languageCode) {
-        this.defaultLanguage = languageCode.toLowerCase();
+        Objects.requireNonNull(languageCode, "languageCode");
+        this.defaultLanguage = languageCode.toLowerCase(Locale.ROOT);
     }
 
     public void setDefaultVersion(String version) {
+        Objects.requireNonNull(version, "version");
         this.defaultVersion = version;
     }
 
     public CompletableFuture<Boolean> loadLanguageAsync(String languageCode, String version) {
-        return CompletableFuture.supplyAsync(() -> loadLanguage(languageCode, version));
+        return CompletableFuture.supplyAsync(() -> loadLanguage(languageCode, version), loaderExecutor);
     }
 
     public boolean loadLanguage(String languageCode, String version) {
-        languageCode = languageCode.toLowerCase();
-        version = version.toLowerCase();
+        Objects.requireNonNull(languageCode, "languageCode");
+        Objects.requireNonNull(version, "version");
 
-        if (loadedLanguages.containsKey(languageCode)) {
+        String code = languageCode.toLowerCase(Locale.ROOT);
+        if (loadedLanguages.containsKey(code)) {
             return true;
         }
 
-        File langFile = resolveLanguageFile(languageCode, version);
+        Path langFile = resolveLanguageFile(code, version.toLowerCase(Locale.ROOT));
         if (langFile == null) {
             return false;
         }
 
-        return parseAndCacheLanguage(languageCode, langFile);
+        return parseAndCacheLanguage(code, langFile);
     }
 
     public CompletableFuture<Boolean> loadDefaultLanguageAsync() {
@@ -83,14 +118,18 @@ public class MLang {
     }
 
     public String getTranslation(String languageCode, String key) {
-        JsonObject langJson = loadedLanguages.get(languageCode.toLowerCase());
-        if (langJson == null || !langJson.has(key)) {
-            if (!languageCode.equals(defaultLanguage)) {
-                return getTranslation(defaultLanguage, key);
-            }
-            return key;
+        Objects.requireNonNull(languageCode, "languageCode");
+        Objects.requireNonNull(key, "key");
+
+        String code = languageCode.toLowerCase(Locale.ROOT);
+        JsonObject langJson = loadedLanguages.get(code);
+        if (langJson != null && langJson.has(key)) {
+            return langJson.get(key).getAsString();
         }
-        return langJson.get(key).getAsString();
+        if (!code.equals(defaultLanguage)) {
+            return getTranslation(defaultLanguage, key);
+        }
+        return key;
     }
 
     public String getTranslation(String key) {
@@ -138,7 +177,8 @@ public class MLang {
     }
 
     public boolean isLanguageLoaded(String languageCode) {
-        return loadedLanguages.containsKey(languageCode.toLowerCase());
+        Objects.requireNonNull(languageCode, "languageCode");
+        return loadedLanguages.containsKey(languageCode.toLowerCase(Locale.ROOT));
     }
 
     public String[] getLoadedLanguages() {
@@ -146,66 +186,98 @@ public class MLang {
     }
 
     private void initializeLanguagesDirectory() {
-        File langDir = new File(plugin.getDataFolder(), "languages");
-        if (!langDir.exists() && !langDir.mkdirs()) {
-            log.warning("Failed to create languages directory");
+        try {
+            Files.createDirectories(languagesDirectory());
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Failed to create languages directory", e);
         }
     }
 
-    private File resolveLanguageFile(String languageCode, String version) {
-        File langDir = new File(plugin.getDataFolder(), "languages");
-        File langFile = new File(langDir, languageCode + ".json");
-
-        if (!langFile.exists()) {
-            String fileUrl = GITHUB_BASE_URL + version + "/assets/minecraft/lang/" + languageCode + ".json";
-            if (!downloadLanguageFile(languageCode, fileUrl, langFile)) {
-                return null;
-            }
-        }
-        return langFile;
+    private Path languagesDirectory() {
+        return plugin.getDataFolder().toPath().resolve("languages");
     }
 
-    private boolean downloadLanguageFile(String languageCode, String fileUrl, File saveTo) {
-        log.info("Downloading language file: " + languageCode);
+    private Path resolveLanguageFile(String languageCode, String version) {
+        Path langFile = languagesDirectory().resolve(languageCode + ".json");
+        if (Files.exists(langFile)) {
+            return langFile;
+        }
+        return downloadLanguageFile(languageCode, version, langFile) ? langFile : null;
+    }
 
-        try (BufferedInputStream in = new BufferedInputStream(new URL(fileUrl).openStream());
-             FileOutputStream out = new FileOutputStream(saveTo)) {
+    private boolean downloadLanguageFile(String languageCode, String version, Path saveTo) {
+        String fileUrl = GITHUB_BASE_URL + version + "/assets/minecraft/lang/" + languageCode + ".json";
+        logger.info("Downloading language file: " + languageCode);
 
-            byte[] buffer = new byte[1024];
-            int bytesRead;
-            while ((bytesRead = in.read(buffer)) != -1) {
-                out.write(buffer, 0, bytesRead);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(fileUrl))
+                .timeout(REQUEST_TIMEOUT)
+                .GET()
+                .build();
+
+        Path tempFile = null;
+        try {
+            Files.createDirectories(saveTo.getParent());
+            tempFile = Files.createTempFile(saveTo.getParent(), languageCode, ".tmp");
+
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream body = response.body()) {
+                if (response.statusCode() != 200) {
+                    logger.severe("Failed to download language file: " + languageCode
+                            + " - HTTP " + response.statusCode());
+                    return false;
+                }
+                try (OutputStream out = Files.newOutputStream(tempFile)) {
+                    body.transferTo(out);
+                }
             }
 
-            log.info("Successfully downloaded language file: " + languageCode);
+            // The file appears in place only as a whole, so an interrupted download never leaves broken JSON.
+            Files.move(tempFile, saveTo, StandardCopyOption.REPLACE_EXISTING);
+            logger.info("Successfully downloaded language file: " + languageCode);
             return true;
         } catch (IOException e) {
-            log.severe("Failed to download language file: " + languageCode + " - " + e.getMessage());
+            logger.log(Level.SEVERE, "Failed to download language file: " + languageCode, e);
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.log(Level.SEVERE, "Download interrupted: " + languageCode, e);
+            return false;
+        } finally {
+            deleteQuietly(tempFile);
+        }
+    }
+
+    private boolean parseAndCacheLanguage(String languageCode, Path langFile) {
+        try (Reader reader = Files.newBufferedReader(langFile, StandardCharsets.UTF_8)) {
+            JsonObject jsonObject = gson.fromJson(reader, JsonObject.class);
+            if (jsonObject == null) {
+                logger.severe("Language file is empty: " + languageCode);
+                return false;
+            }
+            loadedLanguages.put(languageCode, jsonObject);
+            logger.info("Successfully loaded language: " + languageCode);
+            return true;
+        } catch (IOException | JsonParseException e) {
+            logger.log(Level.SEVERE, "Failed to parse language file: " + languageCode, e);
             return false;
         }
     }
 
-    private boolean parseAndCacheLanguage(String languageCode, File langFile) {
-        try (FileReader reader = new FileReader(langFile)) {
-            JsonObject jsonObject = gson.fromJson(reader, JsonObject.class);
-            if (jsonObject != null) {
-                loadedLanguages.put(languageCode, jsonObject);
-                log.info("Successfully loaded language: " + languageCode);
-                return true;
-            }
-        } catch (IOException e) {
-            log.severe("Failed to parse language file: " + languageCode + " - " + e.getMessage());
+    private void deleteQuietly(Path file) {
+        if (file == null) {
+            return;
         }
-        return false;
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+        }
     }
 
     private String detectMinecraftVersion() {
         try {
-            String version = org.bukkit.Bukkit.getBukkitVersion();
-            String[] parts = version.split("-");
-            return parts.length > 0 ? parts[0] : DEFAULT_VERSION;
+            return Bukkit.getBukkitVersion().split("-", 2)[0];
         } catch (Exception e) {
-            return DEFAULT_VERSION;
+            return FALLBACK_VERSION;
         }
     }
 }

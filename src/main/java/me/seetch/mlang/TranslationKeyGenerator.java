@@ -8,6 +8,8 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.EntityType;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.Locale;
+
 @UtilityClass
 public class TranslationKeyGenerator {
 
@@ -20,35 +22,34 @@ public class TranslationKeyGenerator {
 
     public String getMaterialKey(Material material) {
         String prefix = material.isBlock() ? BLOCK_PREFIX : ITEM_PREFIX;
-        return prefix + material.name().toLowerCase();
+        return prefix + material.name().toLowerCase(Locale.ROOT);
     }
 
     public String getEffectKey(Effect effect) {
-        return EFFECT_PREFIX + effect.name().toLowerCase();
+        return EFFECT_PREFIX + effect.name().toLowerCase(Locale.ROOT);
     }
 
     public String getEnchantmentKey(Enchantment enchantment) {
         NamespacedKey key = enchantment.getKey();
-        String prefix = key.getNamespace().equals("minecraft") ? ENCHANTMENT_PREFIX : "enchantment." + key.getNamespace() + ".";
+        String prefix = NamespacedKey.MINECRAFT.equals(key.getNamespace())
+                ? ENCHANTMENT_PREFIX
+                : "enchantment." + key.getNamespace() + ".";
         return prefix + key.getKey();
     }
 
     public String getEntityKey(EntityType entityType) {
-        return ENTITY_PREFIX + entityType.name().toLowerCase();
+        return ENTITY_PREFIX + entityType.name().toLowerCase(Locale.ROOT);
     }
 
     public String getItemStackKey(ItemStack itemStack) {
         if (itemStack == null || itemStack.getType() == Material.AIR) {
             return BLOCK_PREFIX + "air";
         }
-
-        Material material = itemStack.getType();
-        String prefix = material.isBlock() ? BLOCK_PREFIX : ITEM_PREFIX;
-        return prefix + material.name().toLowerCase();
+        return getMaterialKey(itemStack.getType());
     }
 
     public String getCustomKey(String key) {
-        return CUSTOM_PREFIX + key.toLowerCase()
+        return CUSTOM_PREFIX + key.toLowerCase(Locale.ROOT)
                 .replace(' ', '_')
                 .replace('-', '_');
     }

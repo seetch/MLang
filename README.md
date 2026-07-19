@@ -12,6 +12,11 @@
 - Full coverage - materials, effects, enchantments, entities, ItemStack
 - Simple API - just a few lines of code to get started
 
+## Requirements
+
+- Java 21+
+- PaperMC/Spigot 1.20+
+
 ## Installation
 
 ### Maven
@@ -23,9 +28,9 @@
 </repository>
 
 <dependency>
-    <groupId>me.seetch.mlang</groupId>
+    <groupId>me.seetch</groupId>
     <artifactId>mlang</artifactId>
-    <version>1.0.1</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
@@ -36,7 +41,7 @@ maven {
     url "https://repo.seetch.ru/releases"
 }
 
-implementation 'me.seetch.mlang:mlang:1.0.1'
+implementation 'me.seetch:mlang:1.1.0'
 ```
 
 ### Manual
