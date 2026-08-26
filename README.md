@@ -1,23 +1,26 @@
-# MLang - Minecraft Language Library
+**English** | [Русский](README.ru.md)
 
-**MLang** - Powerful and easy-to-use library for working with Minecraft localization. Get user-friendly translations for items, effects, enchantments, and other game elements.
+# mlang
 
-## Features
+Minecraft language library for Bukkit/Spigot/Paper plugins: user-friendly
+translations for materials, effects, enchantments, entities and items, without
+having to ship or maintain your own language files.
 
-- Automatic downloading of language files from GitHub
-- Asynchronous operations for non-blocking server work
-- Caching of loaded translations for high performance
-- Multi-language support (en_us, ru_ru, es_es, de_de, etc.)
-- Fallback system - automatic fallback to default language
-- Full coverage - materials, effects, enchantments, entities, ItemStack
-- Simple API - just a few lines of code to get started
+- Automatic downloading of language files from GitHub (InventivetalentDev/minecraft-assets)
+- Asynchronous loading on virtual threads, non-blocking for the server
+- In-memory caching of loaded translations, plus an on-disk cache in the plugin's data folder
+- Multi-language support (en_us, ru_ru, es_es, de_de and every other official Minecraft language)
+- Fallback to the default language when a key or a language is missing
+- Simple API: a couple of lines to get started
 
 ## Requirements
 
 - Java 21+
 - PaperMC/Spigot 1.20+
 
-## Installation
+## Pulling the library from repo.seetch.ru
+
+Published to `https://repo.seetch.ru/releases`.
 
 ### Maven
 
@@ -37,18 +40,22 @@
 ### Gradle
 
 ```groovy
-maven {
-    url "https://repo.seetch.ru/releases"
+repositories {
+    maven { url "https://repo.seetch.ru/releases" }
 }
 
-implementation 'me.seetch:mlang:1.1.0'
+dependencies {
+    implementation 'me.seetch:mlang:1.1.0'
+}
 ```
 
-### Manual
+### Javadoc
 
-Build the JAR file add it to your project.
+Reposilite renders it in the browser at
+`https://repo.seetch.ru/javadoc/releases/me/seetch/mlang/<version>/`, e.g.
+`https://repo.seetch.ru/javadoc/releases/me/seetch/mlang/1.1.0/`.
 
-## Quick Start
+## Quick start
 
 ```java
 import me.seetch.mlang.MLang;
@@ -59,16 +66,10 @@ public class MyPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        // Initialize MLang (Singleton pattern)
         MLang lang = MLang.getInstance(this);
-
-        // Set default language (e.g., Russian)
         lang.setDefaultLanguage("ru_ru");
-
-        // Set Minecraft version (for finding correct translations)
         lang.setDefaultVersion("1.20.4");
 
-        // Load language asynchronously (doesn't block the server)
         lang.loadDefaultLanguageAsync().thenAccept(success -> {
             if (success) {
                 getLogger().info("Language loaded successfully!");
@@ -79,192 +80,87 @@ public class MyPlugin extends JavaPlugin {
     public void exampleUsage() {
         MLang lang = MLang.getInstance(this);
 
-        // Get item translation in Russian
         String translation = lang.getMaterialTranslation("ru_ru", Material.DIAMOND_SWORD);
-        // Result: "Алмазный меч"
+        // "Алмазный меч"
 
-        // Use default language (ru_ru)
         String defaultTranslation = lang.getMaterialTranslation(Material.STONE);
-        // Result: "Камень"
+        // uses whatever setDefaultLanguage() was set to
     }
 }
 ```
 
-## API Documentation
+One instance per JVM, not per plugin: the first call to `getInstance` binds the
+data folder and logger it uses. If several plugins on the same server call
+`getInstance` with different plugin instances, they all share the one bound to
+whichever plugin called it first.
 
-### Initialization
+## API
+
+### Initialization and configuration
 
 ```java
-// Get MLang instance (singleton)
-// plugin - your plugin extending JavaPlugin
 MLang lang = MLang.getInstance(plugin);
+
+lang.setDefaultLanguage("en_us");   // lowercase language code, e.g. en_us, ru_ru, de_de
+lang.setDefaultVersion("1.20.4");   // Minecraft version without the build suffix
 ```
 
-### Configuration
+### Loading languages
 
 ```java
-// Set default language (used when language is not specified)
-// Format: language code in lowercase (en_us, ru_ru, de_de...)
-lang.setDefaultLanguage("en_us");
-
-// Set Minecraft version (for loading correct translations)
-// Format: version without build number (1.20.4, 1.19.2...)
-lang.setDefaultVersion("1.20.4");
-```
-
-### Loading Languages
-
-```java
-// Asynchronous loading (recommended)
-// Returns CompletableFuture<Boolean>
+// Async, recommended: runs on a virtual thread, safe to call from the main thread
 lang.loadLanguageAsync("ru_ru", "1.20.4")
-    .thenAccept(success -> {
-        if (success) {
-            getLogger().info("Russian language loaded!");
-        }
-    });
+    .thenAccept(success -> { /* ... */ });
 
-// Synchronous loading (blocks thread)
-// Use only in async tasks!
+// Sync, blocking: only call from an async context yourself
 boolean success = lang.loadLanguage("es_es", "1.20.4");
 
-// Load default language (ru_ru + 1.20.4)
 lang.loadDefaultLanguageAsync();
 ```
 
-### Getting Translations
+### Getting translations
 
 ```java
-// Materials (blocks and items)
-String material = lang.getMaterialTranslation("ru_ru", Material.DIAMOND);
-// "Алмаз"
-
-String block = lang.getMaterialTranslation("en_us", Material.STONE);
-// "Stone"
-
-// Effects
-String effect = lang.getEffectTranslation("en_us", Effect.SPEED);
-// "Speed"
-
-// Enchantments
-String enchantment = lang.getEnchantmentTranslation("de_de", Enchantment.SHARPNESS);
-// "Schärfe"
-
-// Entity types
-String entity = lang.getEntityTranslation("fr_fr", EntityType.ZOMBIE);
-// "Zombie"
-
-// ItemStack (with metadata support)
+String material = lang.getMaterialTranslation("ru_ru", Material.DIAMOND);              // "Алмаз"
+String effect = lang.getEffectTranslation("en_us", Effect.SPEED);                      // "Speed"
+String enchantment = lang.getEnchantmentTranslation("de_de", Enchantment.SHARPNESS);   // "Schärfe"
+String entity = lang.getEntityTranslation("fr_fr", EntityType.ZOMBIE);                 // "Zombie"
 String item = lang.getItemStackTranslation("es_es", itemStack);
-// "Espada de diamante"
-
-// Direct key access (for custom keys)
-String custom = lang.getTranslation("ru_ru", "block.minecraft.stone");
-// "Камень"
+String custom = lang.getTranslation("ru_ru", "block.minecraft.stone");                 // "Камень"
 ```
 
 ### Utilities
 
 ```java
-// Generate translation key for material
-// Useful for creating custom language files
-String key = TranslationKeyGenerator.getMaterialKey(Material.STONE);
-// "block.minecraft.stone"
+String key = TranslationKeyGenerator.getMaterialKey(Material.STONE); // "block.minecraft.stone"
 
-// Check if language is loaded
 boolean isLoaded = lang.isLanguageLoaded("ru_ru");
-
-// Get all loaded languages
 String[] languages = lang.getLoadedLanguages();
 ```
 
-## Supported Languages
+## File layout
 
-MLang supports all official Minecraft languages:
-- en_us - English (United States)
-- ru_ru - Русский
-- es_es - Español (España)
-- de_de - Deutsch (Deutschland)
-- fr_fr - Français (France)
-- zh_cn - 简体中文
-- ja_jp - 日本語
-- And many others...
-
-## File Structure
-
-MLang automatically creates a `languages` folder in your plugin directory:
+mlang creates a `languages` folder in the plugin's data folder and stores
+downloaded language files there:
 
 ```
 plugins/
 └── YourPlugin/
-    └── languages/       # downloaded language files
+    └── languages/
         ├── en_us.json
         ├── ru_ru.json
         └── ...
 ```
 
-## Integration Examples
-
-### Getting Item Display Name for Player
-
-```java
-public String getItemDisplayName(ItemStack item, String playerLanguage) {
-    MLang lang = MLang.getInstance(yourPlugin);
-
-    // Get item name translation
-    String name = lang.getItemStackTranslation(playerLanguage, item);
-
-    // Add visual effects for enchanted items
-    if (item.hasItemMeta() && item.getItemMeta().hasEnchants()) {
-        name = "§a" + name + " §7(Enchanted)";
-    }
-
-    return name;
-}
-```
-
-### Getting Entity Name
-
-```java
-public String getEntityName(EntityType type, String language) {
-    // Simple call - uses default language
-    return MLang.getInstance(yourPlugin).getEntityTranslation(language, type);
-}
-```
-
-## Performance
-
-- **Caching**: All loaded languages are stored in memory
-- **Lazy loading**: Files are downloaded only when needed
-- **Asynchronous**: Loading doesn't block the main server thread
-- **Memory optimization**: Efficient resource usage
-
-## Error Handling
-
-```java
-lang.loadLanguageAsync("invalid_lang", "1.20.4")
-    .exceptionally(throwable -> {
-        // This method is called on loading error
-        getLogger().warning("Failed to load language: " + throwable.getMessage());
-        return false;
-    })
-    .thenAccept(success -> {
-        // This method is called on success OR after error
-        if (!success) {
-            getLogger().warning("Language was not loaded");
-        }
-    });
-```
-
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE)
 
 ## Acknowledgments
 
 - [InventivetalentDev](https://github.com/InventivetalentDev) for minecraft-assets
-- Bukkit/Spigot/Paper community for the excellent platform
+- Bukkit/Spigot/Paper community for the platform
 
 ## Support
 
-If you have questions or suggestions, create an [Issue](https://github.com/seetch/MLang/issues) on GitHub.
+Questions or suggestions: open an [Issue](https://github.com/seetch/mlang/issues).

@@ -10,6 +10,11 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.Locale;
 
+/**
+ * Строит ключи переводов в формате ванильных языковых файлов Minecraft,
+ * например "block.minecraft.stone". Сам ничего не переводит, только собирает
+ * ключ, по которому MLang потом ищет строку в загруженном языковом файле.
+ */
 @UtilityClass
 public class TranslationKeyGenerator {
 
@@ -20,15 +25,22 @@ public class TranslationKeyGenerator {
     private static final String ENTITY_PREFIX = "entity.minecraft.";
     private static final String CUSTOM_PREFIX = "mlang.";
 
+    /** Возвращает ключ перевода материала. Префикс зависит от того, блок это или предмет. */
     public String getMaterialKey(Material material) {
         String prefix = material.isBlock() ? BLOCK_PREFIX : ITEM_PREFIX;
         return prefix + material.name().toLowerCase(Locale.ROOT);
     }
 
+    /** Возвращает ключ перевода эффекта зелья. */
     public String getEffectKey(Effect effect) {
         return EFFECT_PREFIX + effect.name().toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * Возвращает ключ перевода зачарования. Для зачарований из немайнкрафтовского
+     * namespace (например добавленных другим плагином) вместо стандартного префикса
+     * "enchantment.minecraft." подставляет в префикс реальный namespace зачарования.
+     */
     public String getEnchantmentKey(Enchantment enchantment) {
         NamespacedKey key = enchantment.getKey();
         String prefix = NamespacedKey.MINECRAFT.equals(key.getNamespace())
@@ -37,10 +49,12 @@ public class TranslationKeyGenerator {
         return prefix + key.getKey();
     }
 
+    /** Возвращает ключ перевода типа сущности. */
     public String getEntityKey(EntityType entityType) {
         return ENTITY_PREFIX + entityType.name().toLowerCase(Locale.ROOT);
     }
 
+    /** Возвращает ключ перевода предмета. Для null или воздуха возвращает ключ блока воздуха. */
     public String getItemStackKey(ItemStack itemStack) {
         if (itemStack == null || itemStack.getType() == Material.AIR) {
             return BLOCK_PREFIX + "air";
@@ -48,6 +62,7 @@ public class TranslationKeyGenerator {
         return getMaterialKey(itemStack.getType());
     }
 
+    /** Строит собственный ключ перевода с префиксом mlang, заменяя пробелы и дефисы на подчёркивания. */
     public String getCustomKey(String key) {
         return CUSTOM_PREFIX + key.toLowerCase(Locale.ROOT)
                 .replace(' ', '_')
